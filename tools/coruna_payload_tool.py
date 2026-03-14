@@ -372,29 +372,38 @@ def cmd_inspect_record(args: argparse.Namespace) -> int:
         return 0
 
     if magic == 0xDEADD00F:
-        if len(blob) < 0x24:
+        if len(blob) < 0x18:
             raise ValueError("DEADD00F record too small")
-        enabled_flag = struct.unpack_from("<I", blob, 4)[0]
-        words = [struct.unpack_from("<I", blob, off)[0] for off in range(8, 0x24, 4)]
-        string_length = words[-1]
-        string_offset = words[-2]
-        if string_offset + string_length > len(blob):
-            raise ValueError(
-                f"string overruns blob: offset={string_offset:#x} length={string_length:#x} size={len(blob):#x}"
-            )
-        payload_name = decode_c_string(blob[string_offset:string_offset + string_length])
-        print(f"kind=deadd00f magic={magic:#x} enabled_flag={enabled_flag}")
-        print(f"field_08={words[0]:#x}")
-        print(f"field_0c={words[1]:#x}")
-        print(f"field_10={words[2]:#x}")
-        print(f"field_14={words[3]:#x}")
-        print(f"field_18={words[4]:#x}")
-        print(f"string_offset={string_offset:#x}")
-        print(f"string_length={string_length:#x}")
-        print(f"payload_name={payload_name!r}")
-        trailing = len(blob) - (string_offset + string_length)
-        if trailing:
-            print(f"trailing_bytes={trailing}")
+        raw_flags_04 = struct.unpack_from("<I", blob, 4)[0]
+        enabled = blob[5] != 0
+        ttl_seconds = struct.unpack_from("<I", blob, 8)[0]
+        print(f"kind=deadd00f magic={magic:#x} raw_flags_04={raw_flags_04:#x}")
+        print(f"enabled={enabled}")
+        print(f"ttl_seconds={ttl_seconds:#x}")
+
+        if len(blob) >= 0x10:
+            print(f"field_0c={struct.unpack_from('<I', blob, 0x0c)[0]:#x}")
+        if len(blob) >= 0x14:
+            print(f"field_10={struct.unpack_from('<I', blob, 0x10)[0]:#x}")
+        if len(blob) >= 0x18:
+            print(f"field_14={struct.unpack_from('<I', blob, 0x14)[0]:#x}")
+        if len(blob) >= 0x1c:
+            print(f"field_18={struct.unpack_from('<I', blob, 0x18)[0]:#x}")
+
+        if len(blob) >= 0x24:
+            string_offset = struct.unpack_from("<I", blob, 0x1c)[0]
+            string_length = struct.unpack_from("<I", blob, 0x20)[0]
+            if string_offset + string_length > len(blob):
+                raise ValueError(
+                    f"string overruns blob: offset={string_offset:#x} length={string_length:#x} size={len(blob):#x}"
+                )
+            payload_name = decode_c_string(blob[string_offset:string_offset + string_length])
+            print(f"string_offset={string_offset:#x}")
+            print(f"string_length={string_length:#x}")
+            print(f"payload_name={payload_name!r}")
+            trailing = len(blob) - (string_offset + string_length)
+            if trailing:
+                print(f"trailing_bytes={trailing}")
         return 0
 
     if magic == 0xF00DBEEF:

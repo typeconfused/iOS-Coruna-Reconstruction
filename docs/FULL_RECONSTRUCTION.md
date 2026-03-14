@@ -506,7 +506,7 @@ So `_start` is the handoff from the bootstrap record store into the native drive
 
 and then uses byte offset `0x5` as the boolean mode flag, with the TTL dword coming from offset `0x8`, before continuing into `sub_8E84`.
 
-Observed live `0x70005` blob fields after the magic:
+Observed fields in the live `0x70005` blob after the magic. The blob we recovered is larger than the `0x18` minimum accepted by `_startr`:
 
 - raw flags dword at offset `0x4` with the enable bit read from byte `0x5`
 - TTL `0x15180` (`86400`) at offset `0x8`
@@ -564,7 +564,7 @@ Export:
 
 - allocates a `0x1d60` state object
 - initializes it via `sub_3CCA8`
-- verifies it via `sub_13EBC`
+- probes mount/update state via `sub_13EBC` and records the result into the object
 - returns the initialized object
 
 ### `sub_3E580`
