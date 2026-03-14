@@ -223,9 +223,9 @@ struct coruna80000_thread_pack {
     void *payload_bytes;
     uint32_t payload_size;
     uint32_t reserved_1c;
-    void *symbol_slot_0;
-    void *symbol_slot_1;
-    void *symbol_slot_2;
+    void *record_70003_string;
+    void *record_70004_string;
+    void *record_70006_string;
 };
 
 size_t coruna_selector_blob_expected_size(uint32_t count);

@@ -309,7 +309,7 @@ The only fields used directly by `_startr` in the recovered path are the enable 
 
 ## Offline Reconstruction Workflow
 
-The helper script in `tools/coruna_payload_tool.py` is enough to reproduce the live container and inspect the small records:
+The helper script in `tools/coruna_payload_tool.py` is enough to reproduce the live container and inspect the small records if you also have the original `live-site/` mirror referenced below. That mirror is not included in this standalone repo:
 
 ```bash
 python3 tools/coruna_payload_tool.py build-container \

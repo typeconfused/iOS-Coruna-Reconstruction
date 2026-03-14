@@ -4,6 +4,8 @@
 
 This document reconstructs the exploit chain as it exists in the live mirror under `live-site/`, with emphasis on showing how the chain actually works end to end instead of only annotating isolated RE fragments.
 
+The standalone published repo does not include that `live-site/` mirror or `EXPLOIT_CHAIN_WRITEUP.md`. References to those files are provenance notes from the original research workspace, not files available in this package.
+
 The reconstruction below is based on:
 
 - `EXPLOIT_CHAIN_WRITEUP.md`
@@ -744,7 +746,7 @@ To reproduce the native payload chain offline without the browser exploit:
 2. Extract `__TEXT,__SBTweak` from `TweakLoader.dylib`.
 3. Inspect exported symbols from the extracted Mach-O.
 
-The helper script added in `tools/coruna_payload_tool.py` supports this.
+The helper script added in `tools/coruna_payload_tool.py` supports this, but the examples below require the original `live-site/` mirror that is not included in this standalone repo.
 
 Examples:
 

@@ -120,7 +120,7 @@ bool coruna_mode_blob_view_init(
         return false;
     }
 
-    if (byte_size < 0x1c) {
+    if (byte_size < 0x18) {
         return false;
     }
 
@@ -138,7 +138,10 @@ bool coruna_mode_blob_view_init(
     out_view->field_0c = words[3];
     out_view->field_10 = words[4];
     out_view->field_14 = words[5];
-    out_view->field_18 = words[6];
+    out_view->field_18 = 0;
+    if (byte_size >= 0x1c) {
+        out_view->field_18 = words[6];
+    }
     return true;
 }
 
@@ -148,7 +151,7 @@ bool coruna90000_driver_object_validate(const struct coruna90000_driver_object *
         return false;
     }
 
-    if (object->abi_major < 2 || object->abi_minor < 2) {
+    if (object->abi_major != 2 || object->abi_minor < 2) {
         return false;
     }
 
@@ -161,7 +164,7 @@ bool coruna90001_driver_object_validate(const struct coruna90001_driver_object *
         return false;
     }
 
-    if (object->abi_major < 2 || object->abi_minor < 2) {
+    if (object->abi_major != 2 || object->abi_minor < 2) {
         return false;
     }
 

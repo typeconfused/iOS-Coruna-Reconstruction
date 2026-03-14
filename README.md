@@ -1,6 +1,6 @@
 # iOS-Coruna-Reconstruction
 
-Clean-room reconstruction of the **Coruna** iOS exploit chain targeting **iOS 16.2 – 17.2.1**.
+Clean-room reconstruction of the **Coruna** iOS exploit chain. The browser-stage notes span **iOS 16.2 – 17.2.1**; the documented native chain in this repo is strongest for **iOS 16.3+**.
 
 ## Chain Overview
 
@@ -39,6 +39,8 @@ Clean-room reconstruction of the **Coruna** iOS exploit chain targeting **iOS 16
 ## Disclaimer
 
 This repository was assembled primarily with Codex GPT-5.4 xhigh across multiple iterative passes — not a single one-shot generation. Each pass refined and cross-checked the previous output against disassembly, decompilation, and known chain behavior, but the results are still AI-assisted inferences. There may be mistakes, omissions, or misinterpretations. Verify offsets, structures, control flow, primitives, and behavioral conclusions against the original binaries, firmware images, and live test devices before relying on any part of it.
+
+This standalone repo is a distilled publication, not the original workspace. Some long-form notes cite the original `live-site/` mirror and an internal writeup as provenance; those inputs are not included here.
 
 ## Scope
 

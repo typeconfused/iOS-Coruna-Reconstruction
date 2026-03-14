@@ -119,7 +119,6 @@ int64_t coruna_stage_record_store_build_from_slots(
     size_t slot_count)
 {
     size_t index;
-    size_t limit;
     int64_t status;
 
     if (out_store == NULL || slots == NULL) {
@@ -131,12 +130,11 @@ int64_t coruna_stage_record_store_build_from_slots(
         return status;
     }
 
-    limit = slot_count;
-    if (limit > CORUNA_STAGE_SLOT_COUNT) {
-        limit = CORUNA_STAGE_SLOT_COUNT;
+    if (slot_count > CORUNA_STAGE_SLOT_COUNT) {
+        return CORUNA_STATUS_RECORD_STORE_FULL;
     }
 
-    for (index = 0; index < limit; index++) {
+    for (index = 0; index < slot_count; index++) {
         if (slots[index].record_id == 0) {
             continue;
         }
@@ -176,8 +174,8 @@ bool coruna80000_thread_pack_init(
     out_pack->join_worker = (uint8_t)(!create_detached_thread);
     out_pack->payload_bytes = payload_bytes;
     out_pack->payload_size = payload_size;
-    out_pack->symbol_slot_0 = record_70003;
-    out_pack->symbol_slot_1 = record_70004;
-    out_pack->symbol_slot_2 = record_70006;
+    out_pack->record_70003_string = record_70003;
+    out_pack->record_70004_string = record_70004;
+    out_pack->record_70006_string = record_70006;
     return true;
 }
