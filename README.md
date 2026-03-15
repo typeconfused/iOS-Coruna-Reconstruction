@@ -21,8 +21,8 @@ Clean-room reconstruction of the **Coruna** iOS exploit chain. The browser-stage
 ┌──────────────────────────────┐
 │  Stage 1 — Browser Primitive │
 │                              │
-│  "terrorbird" 16.2–16.5.1   │
-│  "cassowary"  16.6–17.2.1   │
+│  "terrorbird" 16.2–16.5.1    │
+│  "cassowary"  16.6–17.2.1    │
 │                              │
 │  JIT/speculation bug         │
 │  → JSC heap corruption       │
@@ -32,11 +32,11 @@ Clean-room reconstruction of the **Coruna** iOS exploit chain. The browser-stage
 └──────────────┬───────────────┘
                ▼
 ┌──────────────────────────────┐
-│  Stage 2 — PAC Bypass       │
+│  Stage 2 — PAC Bypass        │
 │  ("seedbell")                │
 │                              │
-│  16.x + 17.x branches       │
-│  JS r/w → arm64e PAC        │
+│  16.x + 17.x branches        │
+│  JS r/w → arm64e PAC         │
 │  sign/auth/call via          │
 │  BreakIterator abuse         │
 └──────────────┬───────────────┘
