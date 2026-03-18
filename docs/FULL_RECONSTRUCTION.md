@@ -347,6 +347,7 @@ The stable record IDs in the modern payload sets are:
 - `0x80000`
 - `0x90000`
 - `0x90001`
+- `0xA0000`
 - `0xF0000`
 
 The filename is secondary after Stage3 rebuilds the container. `f1` is the real contract.
@@ -356,6 +357,15 @@ Resolved role split:
 - `0x50000` is a raw arm64 helper loader blob used only on the auxiliary bootstrap path.
 - `0x90000` is the main post-exploit driver object resolved by `0x80000`.
 - `0x90001` is a transient helper-driver object used by bootstrap to control `0x50000`.
+- `0xA0000` is the anti-forensics cleanup module invoked from the `sub_7410` worker-thread dispatch path before `_startr`.
+
+Additionally, the `0x80000` orchestrator internally references at least three record IDs that do not appear in the Stage3 manifest:
+
+- `0x10000`: loaded image from which `_startx` is resolved (in the `sub_6BA0` / `_startr` continuation path).
+- `0x30000`: loaded image from which `_starti` is resolved (in the `sub_BA2C` multi-path activation).
+- `0x40000`: data blob passed as input to `_starti`.
+
+These records are not present in `payloads/manifest.json`. They are either synthesized at runtime by bootstrap/`_startl`, composed from other record data, or injected through an unrecovered path. Their absence from the manifest means they are not fetched from the JS side via `buildContainer()`.
 
 ## `0x50000` And `0x90001`: Auxiliary Bootstrap Helper Path
 
@@ -497,19 +507,32 @@ So the firmware-backed description is:
 
 ## `0x80000`: Orchestrator Dylib
 
-Exports:
+Two size variants are observed across the payload sets: 228928 bytes (the 377bed variant documented in the original writeup) and 196864 bytes (the e9f89858 variant analyzed below). Both share the same export surface.
+
+### Exports (377bed variant)
 
 - `_start` at `0x8754`
 - `_startl` at `0x8228`
 - `_startr` at `0x8d90`
 - `_startm` at `0x94dc`
 
-Important mechanics:
+### Exports (e9f89858 variant)
 
-- `_start` patches a set of callback slots in the copied bootstrap state.
-- It resolves `_driver` from record `0x90000`.
-- It calls `_driver` to obtain a vtable-backed interface object.
-- It resolves `_startl` from record `0x80000` and passes the interface object into it.
+- `_start` at `0x65fc`
+- `_startl` at `0x60f4`
+- `_startr` at `0x6ab0`
+- `_startm` at `0x71ec`
+
+The orchestrator also carries these symbol strings, indicating it resolves them from other records at runtime: `_startsc`, `_startx`, `_starti`.
+
+### `_start`
+
+`_start` patches four callback slots in the copied bootstrap context (`ctx + 40`, `ctx + 176`, `ctx + 288`, `ctx + 296`), then:
+
+1. resolves `_driver` from record `0x90000`
+2. calls `_driver` to obtain a vtable-backed interface object
+3. validates the object header: word `0x0002` and version `>= 2`
+4. resolves `_startl` from record `0x80000` and calls `_startl(ctx, driver_obj)`
 
 So `_start` is the handoff from the bootstrap record store into the native driver/service object.
 
@@ -520,7 +543,9 @@ So `_start` is the handoff from the bootstrap record store into the native drive
 - minimum size `0x18`
 - magic `0xDEADD00F`
 
-and then uses byte offset `0x5` as the boolean mode flag, with the TTL dword coming from offset `0x8`, before continuing into `sub_8E84`.
+and then uses byte offset `0x4` (not `0x5` — byte `0x5` is the second byte of the flags dword but this variant reads the whole byte at `+0x4`) as the boolean mode flag, with the TTL dword coming from offset `0x8`, before continuing into `sub_6BA0` (e9f89858 variant) / `sub_8E84` (377bed variant).
+
+In the e9f89858 variant, `_startr` at `0x6ab0` calls `sub_6BA0(ctx, mode_flag, 1)`.
 
 Observed fields in the live `0x70005` blob after the magic. The blob we recovered is larger than the `0x18` minimum accepted by `_startr`:
 
@@ -557,13 +582,144 @@ If neither symbol exists, loading fails.
 
 This helper fetches `0xF0000`, obtains a task/mapping context, and packages the loaded image together with the task port and mode flags for later symbol resolution.
 
+### `_startl` Internals (e9f89858 variant at `0x60f4`)
+
+`_startl` receives `(ctx, driver_obj)` from `_start` and:
+
+1. Creates a record store session via `sub_1C954`.
+2. Gets the kernel version triple via the driver object's `+0x20` method.
+3. Registers up to three string records from the bootstrap context:
+   - `ctx + 120` → `0x70003`
+   - `ctx + 160` → `0x70004`
+   - `ctx + 168` → `0x70006`
+4. Creates a 0x38-byte thread pack containing the driver object, kernel info buffer, string record handles, and a mode byte.
+5. Spawns `sub_71F8` on a new pthread (detached unless `ctx + 1478` forces join).
+
+The thread pack layout:
+
+- `+0x00` driver object
+- `+0x08` mode byte (inverted from `ctx + 1478`)
+- `+0x10` kernel version buffer
+- `+0x18` kernel version buffer size
+- `+0x20` `0x70004` string handle
+- `+0x28` `0x70006` string handle
+- `+0x30` `0x70003` string handle
+
+### Worker Thread `sub_71F8` → `sub_7410`: Main Post-Exploit Dispatch
+
+`sub_71F8` is the thread entry. It calls `sub_A238` to build a runtime context (creating a record store, registering `0x70003` and `0x70004` strings, calling `sub_C320` for the record-store builder), then calls `sub_7410` for the main dispatch.
+
+`sub_7410` is the core post-exploit function. Recovered sequence:
+
+1. **Entitlement injection:** injects a baked plist fragment granting:
+   - `com.apple.private.webbookmarks.settings`
+   - `com.apple.private.security.storage.DiagnosticReports.read-write`
+2. **Exception guard suppression:** calls `task_get_exc_guard_behavior` / `task_set_exc_guard_behavior` to clear bits `0x88` from the guard mask, preventing crash reports during exploit activity. The original mask is restored at the end.
+3. **Environment check:** calls `sub_7B18` to probe runtime conditions.
+4. **Anti-forensics dispatch:** resolves `_startsc` from record `0xA0000` (655360) via `sub_7BA0(ctx, 655360, "_startsc", ...)` and calls it. If the record is missing (error 28675), execution continues without cleanup.
+5. **Unloads `0xA0000`** via `ctx + 224` callback with flush mode `4`.
+6. **Atomic one-shot gate:** uses `ldaxr`/`stlxr` to ensure the following dispatch runs exactly once per process.
+7. **Resolves and maps `0x80000`** via `ctx + 104` callback, then builds a dispatch table via `sub_7CA4`.
+8. **`_startr` dispatch:** iterates the dispatch table entries. For type `1` with size `4`, dispatches `_startr` via `ctx + 240` callback. For types `2`–`3`, dispatches via `ctx + 248`.
+9. **Post-startr cleanup:** deletes crash reports from:
+   - `/private/var/mobile/Library/Logs/CrashReporte_/`
+   - `/var/containers/Shared/SystemGroup/systemgroup.com.apple.osanalytics/DiagnosticReports`
+   using `sub_7D58` with time-based filtering.
+10. **String record dispatch:** executes `0x70001` and `0x70003` string payloads via `sub_7DC4(sub_7EA4, string_ptr)` on background threads.
+
+### `sub_6BA0`: `_startr` Continuation (e9f89858 variant)
+
+Called from `_startr` with `(ctx, mode_flag, 1)`. This function is the second-stage orchestrator after `_startr` reads the `0x70005` mode record.
+
+Key recovered behavior:
+
+1. If `mode_flag & 1` or the third arg is set, invokes the driver object's method at `+0x40` (batch dispatcher) when `dyldVersionNumber >= 1066.0`.
+2. Fetches records `0x70004` (458756) and `0x70006` (458758) from the record store.
+3. On the non-mode path: fetches `0x70001` (selected path), `0x70004`, and `0x70002` (prefix32 sideband). Calls `sub_863C` with the selected path, `sub_833C` with the prefix32 data, and `sub_8200` to compose an output buffer that is written back to the record store via the `+0x10` method. This is how the `prefix32` sideband is propagated into the native record store.
+4. Builds a runtime context via `sub_A0A4` from the record store, driver, and string records.
+5. Resolves `_startx` from record `0x10000` via `sub_7BA0(ctx, 0x10000, "_startx", ...)`. If found, calls it via `sub_7DC4(sub_8014, ctx)` (threaded execution).
+6. Calls `sub_8DD0` to clean up string data after completion.
+
+So `sub_6BA0` is where the `prefix32` sideband is ultimately consumed on the native side: it is composed with the selected-path string and written as a combined buffer into the record store for downstream consumption.
+
+## `0xA0000`: Anti-Forensics Cleanup Module
+
+Present as `entry4_type0x0a.dylib` in payload sets that include it (e9f89858, f4120dc6, c8a14d79, 1b2cbbde). Record ID `0xA0000` (655360). 36 functions, relatively small binary.
+
+### Export
+
+- `_startsc` at `0x78f0`
+
+### Entry Contract
+
+`_startsc(ctx, session_handle, control_block)`:
+
+- `ctx` header word must be `4` and version `>= 6`.
+- Reads a record-count threshold from `ctx + 160`, requires `count >> 3 >= 0x44B`.
+- Calls `ctx + 128` to set up the session.
+- `control_block` (optional):
+  - byte `+0x0`: enable flag. If `0`, cleanup runs. If nonzero, cleanup is skipped.
+  - dword `+0x4`: age threshold in seconds for time-filtered file deletion.
+- If `session_handle` is zero on entry, calls `ctx + 136` and `ctx + 144` to release the session on exit.
+
+### Cleanup Targets
+
+When enabled, `_startsc` calls `setsid()` to detach from the controlling terminal, then systematically deletes:
+
+**Recursive directory deletion (via `sub_6F70`):**
+- `/private/var/mobile/Library/Caches/com.apple.suggestd/WebKit` (with age filter)
+- `/private/var/db/diagnostics/Persist` (all files, no age filter)
+- `/private/var/db/diagnostics/Signpost` (all files, no age filter)
+- `/private/var/db/diagnostics/Special` (all files, no age filter)
+- `/private/var/db/analyticsd/aggregates/Daily` (all files, no age filter)
+- `/private/var/db/analyticsd/aggregates/90Day` (all files, no age filter)
+- `/private/var/db/analyticsd/aggregates/Never` (all files, no age filter)
+
+**Targeted file deletion by name prefix (via `sub_72A8`):**
+- `/private/var/log/com.apple.xpc.launchd/launchd.log`
+- `/private/var/db/diagnostics/logdata.statistics`
+- `/private/var/mobile/Library/Logs/AppleSupport/general`
+- `/private/var/mobile/Library/Logs/CrashReporte_/com.apple.WebKit.WebContent*`
+- `/private/var/mobile/Library/Logs/CrashReporte_/ExcUserFault_com.apple.WebKit.WebContent*`
+- `/private/var/mobile/Library/Logs/CrashReporte_/JetsamEvent*`
+- `/private/var/mobile/Library/Logs/CrashReporte_/com.apple.WebKit.GPU-*`
+
+**Flat directory age-filtered scan (via `sub_7658`):**
+- `/private/var/mobile/Library/Logs/CrashReporte_/`
+
+### Helper Functions
+
+- `sub_6F70(path, remove_root, age_threshold)`: recursive directory tree deletion. If `age_threshold != 0`, only deletes files whose `ctime` is within `age_threshold` seconds of `time()`. If `remove_root`, also `rmdir`s the directory itself.
+- `sub_72A8(dir, prefix, suffix, age_threshold)`: opens `dir`, iterates entries, deletes regular files whose name starts with `prefix` and optionally ends with `suffix`, subject to the same age filter. Recurses into subdirectories.
+- `sub_7658(dir, age_threshold)`: flat directory scan, deletes regular files within the age threshold.
+- `sub_7238(path)`: single file `unlink` with `chmod 0755` before deletion.
+
+### Purpose
+
+This module removes WebKit exploit traces — crash reports, JetsamEvent logs, WebContent process crashes, diagnostic logs, and analytics aggregates — from the `sub_7410` worker-thread dispatch path before `_startr` runs. The entitlements injected by `sub_7410` (`com.apple.private.security.storage.DiagnosticReports.read-write`) are prerequisites for accessing several of these paths.
+
+### `sub_BA2C`: `_starti` Dispatcher
+
+`sub_BA2C` is called from 7 locations within the 0x80000 orchestrator. Recovered behavior:
+
+1. Fetches record `0x30000` (196608) and loads it as a Mach-O image.
+2. Fetches record `0x40000` (262144) as raw data.
+3. Fetches record `0x90000` (589824) as raw data.
+4. Resolves `_starti` from the loaded `0x30000` image.
+5. Calls `_starti(out_ctx, data_40000, size_40000, data_90000, size_90000, field_24, field_32)`.
+6. `_starti` returns a context object with header word `4` — the same context type consumed by `_startsc`.
+
+The records `0x30000` and `0x40000` are not present in `manifest.json` and their origin at runtime is not yet traced.
+
 ## `0x90000`: Driver-Facade Dylib
+
+### 377bed variant
 
 Export:
 
 - `_driver` at `0x5ec4`
 
-`_driver` allocates a `0x50`-byte vtable-backed object and installs these methods:
+`_driver` allocates a `0x50`-byte vtable-backed object (header word `0x20002` = version 2.2) and installs these methods:
 
 - `sub_5F9C`: destructor/free
 - `sub_5FDC`: create/init state object via `sub_3E42C`
@@ -573,6 +729,25 @@ Export:
 - `sub_60A8`: read a cached status field at offset `+6424`
 - `sub_60EC`: batch dispatcher over a list of operations
 - `sub_6224`: query kernel version triple
+
+### e9f89858 variant
+
+Export:
+
+- `_driver` at `0x600c`
+
+Same 0x50-byte object with header `0x20002`. Vtable methods:
+
+- `+0x10` `sub_60B0`: destructor/free (zeroes all five 128-bit blocks, then `free`)
+- `+0x18` `sub_60E8`: create/init state object via `sub_331EC`
+- `+0x20` `sub_6138`: main dispatcher
+- `+0x28` `sub_6190`: teardown via `sub_340FC`
+- `+0x30` `sub_6174`: teardown/release helper
+- `+0x38` `sub_61AC`: cached status reader
+- `+0x40` `sub_61F0`: batch dispatcher
+- `+0x48` `sub_6324`: kernel version triple — parses `xnu-MAJOR.MINOR.PATCH` from `host_kernel_version()`, requires `RELEASE` kernel
+
+The kernel version method (`sub_6324`) explicitly rejects non-RELEASE kernels and falls back to `sysctl CTL_KERN.KERN_VERSION` if `host_kernel_version()` returns error `53`.
 
 ### `sub_3E42C`
 
@@ -890,19 +1065,27 @@ python3 tools/coruna_payload_tool.py inspect-record \
 
 ## Current Secondary Questions
 
-The previously open `0x50000` and `prefix32` questions are narrowed substantially above. The remaining lower-priority unknowns are narrower:
+The `0x50000`, `prefix32`, `0xA0000`, and optional module questions are substantially narrowed above. The `prefix32` sideband is now traced: `sub_6BA0` in the 0x80000 orchestrator composes it with the selected-path string and writes the result back into the record store for downstream native consumption.
 
-- what native consumer ultimately interprets the forwarded `prefix32` sideband after Stage3 concatenates it into the generated payload buffer
-- whether later stages load any additional optional modules beyond the confirmed `0x50000 -> 0x80000 -> _start -> unload` cycle
+Remaining lower-priority unknowns:
 
-None of those currently change the main chain shape reconstructed here:
+- the runtime origin of records `0x10000`, `0x30000`, and `0x40000` — they are not in `manifest.json` and must be synthesized by bootstrap, `_startl`, or a record-store builder at runtime
+- the role of `_startx` (resolved from `0x10000`) and `_starti` (resolved from `0x30000`) — both are called in the orchestrator but the loaded images they come from have not been identified
+- the exact semantic of the `sub_BA2C` multi-path activation that calls `_starti` from 7 locations in the 0x80000 orchestrator
+- the `platform_module.js` version offset table maps specific iOS builds to internal offset keys, but the mapping between those keys and the native chain's kernel-version thresholds has not been cross-referenced
+
+Resolved chain shape:
 
 - Stage1 gets JS R/W
 - Stage2 gets PAC-aware sign/auth/call
 - Stage3 rebuilds and serves `0xF00DBEEF` bundles
 - bootstrap picks the right hash and dispatches by `f1`
 - `0x90001` controls the helper mapping path, publishes the raw `0x50000` helper region, and adjusts `vm_map` / `pmap` state for it
-- `0x80000` resolves `_driver` and `_last/_end`
+- `0x80000._start` resolves `_driver` from `0x90000` and hands off to `_startl`
+- `_startl` spawns a worker thread that registers string records and calls `sub_7410`
+- `sub_7410` injects entitlements, suppresses exception guards, invokes `_startsc` from `0xA0000` for anti-forensics cleanup, dispatches `_startr`, and performs additional crash-report deletion
+- `_startr` reads the `0x70005` mode record and continues into `sub_6BA0`
+- `sub_6BA0` propagates the `prefix32` sideband into the record store, resolves `_startx` from `0x10000`, and dispatches it
 - `0x90000` builds kernel-level post-exploit access and patches policy state
 - `0xF0000` loads `TweakLoader`
 - `TweakLoader` extracts and runs the embedded visible lockscreen payload

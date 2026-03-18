@@ -5,7 +5,7 @@ This directory is the start of a source-equivalent handoff tree.
 Current scope:
 
 - `include/coruna_contracts.h`
-  - recovered record IDs, including auxiliary `0x70003/04/05/06` and optional `0xA0000`
+  - recovered record IDs, including auxiliary `0x70003/04/05/06`, anti-forensics `0xA0000`, and undocumented runtime records `0x10000/0x30000/0x40000`
   - bootstrap request IDs `0x70001/0x70002` for the selector path / opaque `prefix32` sideband
   - `0xF00DBEEF` container header and entry layout
   - `0x70000` selector blob layout
@@ -35,13 +35,18 @@ Recovered live sequence represented by these contracts:
    - `ctx + 0x130`: unload image
 4. Bootstrap uses those installed callbacks to load `0x80000`, resolve `"_start"`, call it, and unload the temporary image.
 5. `0x80000` resolves `0x90000::_driver`, instantiates the driver object, and passes it into `_startl`.
-6. `_startl` builds a 24-slot record store, injects `0x70003/0x70004` string records, optionally carries `0x70006`, and spawns the worker pack consumed by `sub_94E8`.
-7. The worker consults `0x70005` for mode/TTL and may invoke the optional `0xA0000::_startsc` path before the main `_startr` flow.
+6. `_startl` builds a 24-slot record store, injects `0x70003/0x70004` string records, optionally carries `0x70006`, and spawns the worker thread.
+7. The worker thread (`sub_71F8` → `sub_7410`) injects entitlements, suppresses exception guard notifications, then invokes `0xA0000::_startsc` for anti-forensics cleanup (deleting WebKit caches, diagnostics, crash reports, analytics aggregates).
+8. After cleanup, `sub_7410` dispatches `_startr` from `0x80000`.
+9. `_startr` reads `0x70005` for mode/TTL and continues into `sub_6BA0`.
+10. `sub_6BA0` propagates the `prefix32` sideband into the record store, resolves `_startx` from record `0x10000` (if present), and dispatches it.
+11. `sub_BA2C` (called from multiple points) loads record `0x30000`, resolves `_starti`, and calls it with data from `0x40000` and `0x90000`.
 
 The remaining work is to replace these ABI-level contracts with clean source implementations for:
 
 - `bootstrap.dylib`
 - the `0x50000` loader/runtime
-- the `0x80000` orchestrator
+- the `0x80000` orchestrator (now substantially traced through both the 377bed and e9f89858 variants)
+- the `0xA0000` anti-forensics cleanup module (now fully recovered)
 - the `0x90000` kernel exploit / policy patch path
 - the `0xF0000` final-stage loader

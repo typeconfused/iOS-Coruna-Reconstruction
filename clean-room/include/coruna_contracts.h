@@ -24,6 +24,9 @@ enum coruna_status_code {
 };
 
 enum coruna_record_id {
+    CORUNA_RECORD_10000 = 0x10000,  /* loaded by sub_6BA0; _startx resolved */
+    CORUNA_RECORD_30000 = 0x30000,  /* loaded by sub_BA2C; _starti resolved */
+    CORUNA_RECORD_40000 = 0x40000,  /* data blob passed to _starti */
     CORUNA_RECORD_50000 = 0x50000,
     CORUNA_RECORD_70000 = 0x70000,
     CORUNA_RECORD_70003 = 0x70003,
@@ -33,7 +36,7 @@ enum coruna_record_id {
     CORUNA_RECORD_80000 = 0x80000,
     CORUNA_RECORD_90000 = 0x90000,
     CORUNA_RECORD_90001 = 0x90001,
-    CORUNA_RECORD_A0000 = 0xA0000,
+    CORUNA_RECORD_A0000 = 0xA0000,  /* anti-forensics cleanup; _startsc */
     CORUNA_RECORD_F0000 = 0xF0000,
 };
 

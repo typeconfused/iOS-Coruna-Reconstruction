@@ -9,3 +9,19 @@ dist/
 *.a
 *.so
 *.dylib.dSYM/
+
+# Private research artifacts — not published to the repo.
+# These are the original live-site mirror, IPSW firmware files,
+# IDA databases, and the internal writeup used as provenance
+# during reconstruction. See docs/FULL_RECONSTRUCTION.md for
+# details on why they are excluded from the publication.
+EXPLOIT_CHAIN_WRITEUP.md
+live-site/
+15pm-1703-ipsw/
+*.i64
+*.idb
+*.id0
+*.id1
+*.id2
+*.nam
+*.til

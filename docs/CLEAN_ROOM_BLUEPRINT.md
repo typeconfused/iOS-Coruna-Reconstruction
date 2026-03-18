@@ -251,7 +251,7 @@ Recovered from `_startr` plus the live blob layout:
 ```c
 struct ModeBlobObserved {
     uint32_t magic;          // 0xDEADD00F
-    uint32_t raw_flags_04;   // `_startr` later reads byte 5 as boolean
+    uint32_t raw_flags_04;   // e9f89858 `_startr` reads byte 4 as boolean
     uint32_t ttl_seconds;    // observed 0x15180
     uint32_t field_0c;       // observed 0x7d0
     uint32_t field_10;       // observed 1
@@ -263,7 +263,7 @@ struct ModeBlobObserved {
 };
 ```
 
-The only fields used directly by `_startr` in the recovered path are the enable byte at `+0x5` and the TTL dword at `+0x8`, but the remainder should be preserved when reproducing the live bundle.
+The only fields used directly by `_startr` in the recovered e9f89858 path are the enable byte at `+0x4` and the TTL dword at `+0x8`; older variants should be treated separately until revalidated, but the remainder should be preserved when reproducing the live bundle.
 
 ## Native Record Responsibilities
 
