@@ -133,7 +133,7 @@ bool coruna_mode_blob_view_init(
     out_view->bytes = raw;
     out_view->byte_size = byte_size;
     out_view->raw_flags_04 = words[1];
-    out_view->enabled = raw[5] != 0;
+    out_view->enabled = raw[4] != 0;
     out_view->ttl_seconds = words[2];
     out_view->field_0c = words[3];
     out_view->field_10 = words[4];

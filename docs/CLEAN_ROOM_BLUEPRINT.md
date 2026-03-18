@@ -338,7 +338,7 @@ The only fields used directly by `_startr` in the recovered e9f89858 path are th
 
 ## Offline Reconstruction Workflow
 
-The helper script in `tools/coruna_payload_tool.py` is enough to reproduce the live Stage3 output blob, extract sections, and inspect the small records if you also have the original `live-site/` mirror referenced below. That mirror is not included in this standalone repo. Export-symbol inspection still relies on standard external Mach-O tooling.
+The helper script in `tools/coruna_payload_tool.py` is enough to reproduce the live Stage3 output blob, extract sections, and inspect the small records using the `live-site/` mirror referenced below. If you are working from a trimmed standalone export, point those paths to your equivalent mirror. Export-symbol inspection still relies on standard external Mach-O tooling.
 
 ```bash
 python3 tools/coruna_payload_tool.py build-container \
@@ -355,6 +355,8 @@ python3 tools/coruna_payload_tool.py inspect-record \
 python3 tools/coruna_payload_tool.py inspect-record \
   live-site/payloads/377bed7460f7538f96bbad7bdc2b8294bdc54599/entry3_type0x07.bin
 ```
+
+`--emulate-live-stage3` performs the live `entry2_type0x0f.dylib` rewrite and backfills missing `entry1_type0x0a.bin` records from a deterministic in-tree fallback copy when working from trimmed mirrors.
 
 ## Clean-Room Build Order
 

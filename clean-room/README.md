@@ -9,7 +9,7 @@ Current scope:
   - bootstrap request IDs `0x70001/0x70002` for the selector path / opaque `prefix32` sideband
   - `0xF00DBEEF` container header and entry layout
   - `0x70000` selector blob layout
-  - `0x70005` mode blob view with the enable bit at byte `+0x5` and TTL dword at `+0x8`
+  - `0x70005` mode blob view with the enable bit at byte `+0x4` and TTL dword at `+0x8`
   - bootstrap callback slot offsets used by `0x50000`
   - `0x90000` and `0x90001` vtable object layouts
   - raw helper command IDs observed on the live `0x90001` path

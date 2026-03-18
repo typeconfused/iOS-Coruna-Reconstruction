@@ -21,6 +21,7 @@ CPU_TYPE_ARM64 = 0x0100000C
 CPU_SUBTYPE_ARM64_ALL = 0x0
 CPU_SUBTYPE_ARM64E = 0x2
 ENTRY2_REWRITE_NAME = "entry2_type0x0f.dylib"
+ENTRY1_A0002_NAME = "entry1_type0x0a.bin"
 
 
 @dataclass
@@ -46,6 +47,7 @@ class ResolvedEntry:
     actual_size: int
     manifest_size: Optional[int]
     rewritten: bool
+    resolution_note: Optional[str] = None
 
 
 def normalize_name(raw: bytes) -> str:
@@ -189,6 +191,31 @@ def resolve_entry_path(
     raise FileNotFoundError(f"payload file not found: {candidate}")
 
 
+def resolve_a0002_fallback(payload_root: pathlib.Path) -> pathlib.Path:
+    """
+    In trimmed mirrors, some hashes omit entry1_type0x0a.bin while at least one
+    in-tree copy may still be available under other hashes. Resolve one
+    deterministic copy and reject ambiguous datasets where bytes differ across
+    candidates.
+    """
+    candidates = sorted(payload_root.parent.glob(f"*/{ENTRY1_A0002_NAME}"))
+    if not candidates:
+        raise FileNotFoundError(
+            f"{ENTRY1_A0002_NAME} missing in {payload_root.parent}; "
+            "no fallback candidate is available"
+        )
+
+    canonical = candidates[0]
+    canonical_bytes = canonical.read_bytes()
+    for candidate in candidates[1:]:
+        if candidate.read_bytes() != canonical_bytes:
+            raise ValueError(
+                "ambiguous fallback for entry1_type0x0a.bin: "
+                f"{canonical} and {candidate} differ"
+            )
+    return canonical
+
+
 def cmd_list_sections(args: argparse.Namespace) -> int:
     data = pathlib.Path(args.macho).read_bytes()
     slice_info = select_slice(data, args.arch)
@@ -248,13 +275,30 @@ def build_f00dbeef_container(
     entry_blobs = []
     resolved_entries: List[ResolvedEntry] = []
     for entry in entries:
-        source_path, rewritten = resolve_entry_path(
-            payload_root,
-            entry["file"],
-            emulate_live_stage3,
-            has_pac,
-            tweakloader_root,
-        )
+        resolution_note = None
+        try:
+            source_path, rewritten = resolve_entry_path(
+                payload_root,
+                entry["file"],
+                emulate_live_stage3,
+                has_pac,
+                tweakloader_root,
+            )
+        except FileNotFoundError:
+            entry_f1 = int(entry.get("f1", 0))
+            if (
+                emulate_live_stage3
+                and entry["file"] == ENTRY1_A0002_NAME
+                and entry_f1 == 0xA0002
+            ):
+                source_path = resolve_a0002_fallback(payload_root)
+                rewritten = False
+                resolution_note = (
+                    "substituted missing entry1_type0x0a.bin from "
+                    f"{source_path.parent.name}/{source_path.name}"
+                )
+            else:
+                raise
         blob = source_path.read_bytes()
         declared = entry.get("size")
         if strict_manifest_sizes and declared is not None and declared != len(blob):
@@ -269,6 +313,7 @@ def build_f00dbeef_container(
                 actual_size=len(blob),
                 manifest_size=declared,
                 rewritten=rewritten,
+                resolution_note=resolution_note,
             )
         )
 
@@ -327,6 +372,8 @@ def cmd_build_container(args: argparse.Namespace) -> int:
             notes.append(
                 f"WARNING manifest_size={resolved.manifest_size} actual_size={resolved.actual_size}"
             )
+        if resolved.resolution_note is not None:
+            notes.append(resolved.resolution_note)
         note_text = f" [{' ; '.join(notes)}]" if notes else ""
         print(f"{resolved.manifest_file} -> {resolved.source_path}{note_text}")
     return 0
@@ -376,7 +423,7 @@ def cmd_inspect_record(args: argparse.Namespace) -> int:
         if len(blob) < 0x18:
             raise ValueError("DEADD00F record too small")
         raw_flags_04 = struct.unpack_from("<I", blob, 4)[0]
-        enabled = blob[5] != 0
+        enabled = blob[4] != 0
         ttl_seconds = struct.unpack_from("<I", blob, 8)[0]
         print(f"kind=deadd00f magic={magic:#x} raw_flags_04={raw_flags_04:#x}")
         print(f"enabled={enabled}")
@@ -456,7 +503,11 @@ def build_parser() -> argparse.ArgumentParser:
     build.add_argument(
         "--emulate-live-stage3",
         action="store_true",
-        help="rewrite entry2_type0x0f.dylib to the local TweakLoader, matching Stage3_VariantB.js",
+        help=(
+            "rewrite entry2_type0x0f.dylib to the local TweakLoader, matching "
+            "Stage3_VariantB.js; also fills missing entry1_type0x0a.bin from "
+            "a deterministic in-tree fallback copy when needed"
+        ),
     )
     build.add_argument(
         "--has-pac",

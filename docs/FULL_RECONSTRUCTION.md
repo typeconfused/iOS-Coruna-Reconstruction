@@ -4,7 +4,7 @@
 
 This document reconstructs the exploit chain as it exists in the live mirror under `live-site/`, with emphasis on showing how the chain actually works end to end instead of only annotating isolated RE fragments.
 
-The standalone published repo does not include that `live-site/` mirror or `EXPLOIT_CHAIN_WRITEUP.md`. References to those files are provenance notes from the original research workspace, not files available in this package. Those private materials were used to corroborate the browser/PAC/native chain shape here, but are intentionally excluded from the publication to avoid redistributing the original chain.
+This repository includes that `live-site/` mirror and `EXPLOIT_CHAIN_WRITEUP.md`. Some trimmed standalone exports omit those artifacts; in that case, treat these paths as provenance references and point tooling at your local mirror.
 
 The reconstruction below is based on:
 
@@ -28,7 +28,7 @@ The coverage in this repo breaks down like this:
 - **iOS 17 browser path:** `cassowary` on `16.6–17.2.1`, then `seedbell_pre` plus the newer `seedbell` branch on `17.0–17.2.1`
 - **Shared native path:** `Stage3_VariantB.js`, `bootstrap.dylib`, the `0x50000` helper, records `0x80000` / `0x90000` / `0x90001`, and `0xF0000` sit after browser exploitation and are largely shared across the documented range
 
-Standalone-repo note: the omitted `live-site/` mirror and internal writeup carry much of the line-level provenance for the browser-stage material. The browser/PAC sections here were cross-checked against those private sources; the standalone publication simply does not re-ship them.
+`live-site/` and the internal writeup carry much of the line-level provenance for the browser-stage material. The browser/PAC sections here were cross-checked against those sources.
 
 The remaining implementation gap is the deeper per-version `0x90000` state/patch logic, so the repo documents the iOS 17 browser chain already but does not yet present a source-equivalent 17.x-specific native exploit implementation.
 
@@ -1313,7 +1313,7 @@ To reproduce the native payload chain offline without the browser exploit:
 2. Extract `__TEXT,__SBTweak` from `TweakLoader.dylib`.
 3. Inspect exported symbols from the extracted Mach-O with standard external Mach-O tooling.
 
-The helper script added in `tools/coruna_payload_tool.py` covers step 1, step 2, and small-record inspection. Export-symbol inspection in step 3 still relies on external tooling, and the examples below require the original `live-site/` mirror that is not included in this standalone repo.
+The helper script added in `tools/coruna_payload_tool.py` covers step 1, step 2, and small-record inspection. Export-symbol inspection in step 3 still relies on external tooling. The examples below use the `live-site/` paths in this repository; for trimmed standalone exports, point these flags at your equivalent payload mirror.
 
 Examples:
 
@@ -1326,6 +1326,8 @@ python3 tools/coruna_payload_tool.py build-container \
   --has-pac \
   --output /tmp/377bed.f00dbeef
 ```
+
+`--emulate-live-stage3` applies the live `entry2_type0x0f.dylib` rewrite and also fills missing `entry1_type0x0a.bin` slots from a deterministic in-tree fallback copy when mirrors are trimmed.
 
 ```bash
 python3 tools/coruna_payload_tool.py extract-section \
