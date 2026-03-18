@@ -2,7 +2,7 @@
 
 > **Disclaimer:** This repo was built iteratively with **Codex GPT-5.4 xhigh** and **Claude Opus 4.6 max**, cross-checked against IDA Pro decompilation, the original live mirror, and firmware artifacts. Not a single one-shot generation — each pass refined the previous output against disassembly and known chain behavior. There will be mistakes. Verify everything against the actual binaries before relying on it. The original exploit binaries, JS stages, and IPSW firmware are intentionally excluded to avoid redistributing the chain.
 
-Reverse-engineering reconstruction of the **Coruna** iOS exploit kit, analyzed from the live mirror using IDA Pro. **This is a research analysis — not a working exploit or jailbreak tool.**
+Reverse-engineering reconstruction of the **Coruna** iOS exploit kit, analyzed from the live mirror using IDA Pro. **This is a research analysis — not a working exploit or jailbreak tool.** Based on binaries and clean-up work from [khanhduytran0/coruna](https://github.com/khanhduytran0/coruna) by [34306](https://github.com/34306), [Duy Tran](https://github.com/khanhduytran0), and [Nick Chan](https://github.com/asdfugil).
 
 The full Coruna kit ([documented by Google TAG](https://cloud.google.com/blog/topics/threat-intelligence/coruna-powerful-ios-exploit-kit)) contains 5 full exploit chains and 23 exploits spanning **iOS 13.0 – 17.2.1**. It chains JSC type-confusions, an `Intl.Segmenter`/BreakIterator PAC bypass, and a custom IOGPU/AGX + IOSurface kernel exploit into persistent code execution — then cleans up after itself.
 
