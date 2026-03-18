@@ -6,8 +6,10 @@ Reverse-engineering reconstruction of the **Coruna** iOS exploit kit, analyzed f
 
 The full Coruna kit ([documented by Google TAG](https://cloud.google.com/blog/topics/threat-intelligence/coruna-powerful-ios-exploit-kit)) contains 5 full exploit chains and 23 exploits spanning **iOS 13.0 – 17.2.1**. It chains JSC type-confusions, an `Intl.Segmenter`/BreakIterator PAC bypass, and a custom IOGPU/AGX + IOSurface kernel exploit into persistent code execution — then cleans up after itself.
 
+### Exploit Chain Map
+
 <details>
-<summary><b>Exploit Chain Map</b> — click to expand (per-version CVE/chain breakdown)</summary>
+<summary><h4>Click to expand — per-version CVE/chain breakdown with dead zones</h4></summary>
 
 The kit uses different exploit chains for different iOS sub-ranges — **no single chain works across the entire 13.0–17.2.1 span**. A full chain needs a WebKit RCE + kernel exploit both unpatched. Codenames are from the kit's internal naming.
 
