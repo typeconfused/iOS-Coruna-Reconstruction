@@ -749,58 +749,200 @@ Same 0x50-byte object with header `0x20002`. Vtable methods:
 
 The kernel version method (`sub_6324`) explicitly rejects non-RELEASE kernels and falls back to `sysctl CTL_KERN.KERN_VERSION` if `host_kernel_version()` returns error `53`.
 
-### `sub_3E42C`
+### State Initialization
 
-`sub_3E42C`:
+Both variants allocate a `0x1D60`-byte state object. The 377bed variant uses `sub_3E42C` → `sub_3CCA8`; the e9f89858 variant uses `sub_331EC` → `sub_31BA0`. The init function is the actual exploit setup — it is the largest single function in the binary.
 
-- allocates a `0x1d60` state object
-- initializes it via `sub_3CCA8`
-- probes mount/update state via `sub_13EBC` and records the result into the object
-- returns the initialized object
+Recovered sequence from the e9f89858 variant (`sub_31BA0`, ~500 lines of pseudocode):
 
-### `sub_3E580`
+#### 1. Environment gating
 
-This is the actual heavy native exploit/primitive builder. The important behavior is clear even though the function is large.
+- `mach_timebase_info`, `pthread_mutex_init` x2, `semaphore_create`
+- Kernel version triple stored at `state + 320` (XNU major). Observed values:
+  - `6153` = xnu-6153 (iOS 13.x/Darwin 19)
+  - `7195` = xnu-7195 (iOS 14.x/Darwin 20)
+  - `8019`/`8020` = xnu-8019/8020 (iOS 15.x/Darwin 21)
+  - `8792`/`8796` = xnu-8792/8796 (iOS 16.x/Darwin 22)
+  - `10002` = xnu-10002 (iOS 17.x/Darwin 23)
+- Kernel address/slide stored at `state + 344` as a 64-bit value. Valid range: `0x1C1B1914600000` – `0x225C19046FFFFF`. Values above `0x1F543C41E00000` with build < 8792 are rejected.
 
-Observed mechanics:
+#### 2. Anti-analysis checks
 
-1. Environment and version gate:
-   - records kernel version / build
-   - rejects Corellium / unsupported environments
-   - derives feature flags from the OS / device class
+- `stat("/usr/libexec/corelliumd")` → reject if exists
+- `sandbox_check(getpid(), "iokit-get-properties", SANDBOX_CHECK_NO_REPORT)` → reject if sandboxed
+- IOKit serial number check: reads `IOPlatformSerialNumber` from `IODeviceTree:/`, rejects `CORELLIUM` prefix
+- CPU capability probe: specific CPU families get additional gating (e.g. `hw.cpufamily == 458787763` is A15 Blizzard/Avalanche)
 
-2. Mach memory-entry staging:
-   - `vm_allocate`
-   - `mach_make_memory_entry`
-   - `vm_map`
-   - `madvise`
-   - large port spray with `mach_port_allocate` and raised queue limits
+#### 3. CPU family → capability flags
 
-3. IOSurface pivot:
-   - `IOServiceGetMatchingService("IOSurfaceRoot")` style path via `sub_24D64("IOSurfaceRoot")`
-   - repeated `IOServiceOpen` calls to acquire userclients
-   - `dlopen("/System/Library/Frameworks/IOSurface.framework/IOSurface", ...)`
-   - resolve `kIOSurfaceIsGlobal`, `kIOSurfaceWidth`, `kIOSurfaceHeight`
-   - build a serialized IOSurface create dictionary
-   - call `IOConnectCallMethod(..., selector 0, ...)`
+The exploit branches on `hw.cpufamily`:
 
-4. Kernel pointer harvesting / primitive build:
-   - inspects returned object fields and alignment conditions
-   - derives kernel pointers and region bounds
-   - builds reusable read/write state for later helpers
+| CPU family constant | SoC family | Capability flag set |
+|---|---|---|
+| `-2023363094` | A16 Everest/Sawtooth | `0x1000000` + `32` |
+| `458787763` | A15 Blizzard/Avalanche | `0x80000`, plus `8` on newer builds |
+| `678884788` | A17 Pro | `0x4000000` + `32` |
+| `-1829029944` | A14 Lightning/Thunder | `0x2000` |
+| `-634136515` | M1/M2 family | `0x100000`, plus `32` or `8` depending on core count and build |
+| `1463508716` | newer variant | `0x80000` with kernel-address gating |
+| `131287967` | older variant | `1` |
 
-5. Policy / entitlement patching after primitive build:
-   - looks up `com.apple.security.sandbox`
-   - looks up `com.apple.driver.AppleMobileFileIntegrity`
-   - resolves `developer_mode_status`
-   - resolves `allows_security_research`
-   - patches those fields when they are not already enabled
-   - carries a baked entitlement plist fragment for `task_for_pid-allow`
+On newer kernels (`state + 344 > 0x1F530F027FFFFF`), also reads `hw.model` via sysctl and checks `model[0] & 0xDF == 0x4A` (uppercase 'J' → iPhone model prefix).
 
-6. Special-port and task escalation:
-   - obtains host-related ports
-   - resolves additional kernel handles
-   - finalizes task / host access paths before returning success
+#### 4. Kernel primitive acquisition — three version-dependent paths
+
+This is the core exploit. The function `sub_8A48` (e9f89858 variant) implements three separate kernel primitive techniques selected by kernel address range:
+
+**Path A — Newest kernels (`state+344 >= 0x1F530F02800000` with specific state bits, or `>= 0x2258000000000000`):**
+
+This path uses IOSurface to build a direct kernel memory mapping:
+
+1. Stores the exploit helper context at `state + 7488` and installs `sub_BD90` as the kread callback at `state + 48`.
+2. Opens `IOSurfaceRoot` via `IOServiceMatching` → `IOServiceGetMatchingService` → `IOServiceOpen`.
+3. Creates an IOSurface via `sub_C104(ctx, connect, &index)`.
+4. Walks kernel object pointers from the IOSurface backing store:
+   - Reads version-dependent offsets (280/256 or 288/264 depending on build > 8791)
+   - Follows a chain: `surface_kaddr + offset_1` → `ptr_table + 8*index` → `+64` → `kobj`
+   - Validates alignment: `page_size - (page_mask & kobj) >= 0x500`
+5. Creates a `mach_make_memory_entry(mach_task_self_, &page_size, 0, VM_PROT_ALL|MAP_MEM_NAMED_CREATE, ...)` + `vm_map` pair — this gives userspace a page-aligned mapping.
+6. Finds the kernel pmap-related structure by walking: `kobj → +32 → +56` on builds >= 7195 (deeper chain on newer kernels).
+7. On builds >= `0x1F542301E00000`, applies an additional pointer transformation via `sub_1E99C`.
+8. Resolves a kernel text region base via `sub_2B0A0` and constructs an IOSurface command descriptor:
+   - `+32`: relative offset `(pmap_ptr - text_base) >> shift`
+   - `+36`: `0x2000000` (operation flags)
+   - `+0`: page count `(kobj & ~page_mask) / page_size`
+   - IOSurface command code: `320`
+9. Writes enable bits: `sub_1E8E0(state, pmap_ptr + 32)` (1-byte enable), `sub_1E0B8(state, pmap_ptr + 116, flags | 0x1000)`.
+10. Maps the memory entry again — the mapped address becomes the direct kernel R/W window.
+11. Stores: IOSurface connect at `state + 232`, kernel object address at `state + 240`, mapped address at `state + 248`, size at `state + 256`.
+
+**Path B — Middle kernels (`state+344 >= 0x1C1B0A80100000` with state bits `0x5584001`, or `>= 0x1F530000000000`):**
+
+Uses fd-pair + socket + IOSurface:
+
+1. Creates fd pairs via `sub_1661C` (likely `pipe()`) and `sub_16724`.
+2. Creates a UDP socket: `socket(AF_INET, SOCK_DGRAM, 0)`.
+3. Opens `/private/etc/group` as a kernel fileref.
+4. Walks kernel objects from the socket and pipe fds to correlate kernel addresses.
+5. Scans for 7 consecutive valid kernel pointers aligned within the kernel text bounds — this is a vtable/dispatch table discovery technique for finding the kernel slide.
+6. Stores four fd values at `state + 6448/6452/6464` and a kernel object pointer at `state + 536`.
+7. Installs kread/kwrite primitives via `sub_179B0` on each fd.
+
+**Path C — Oldest kernels (`state+344 < 0x1C1B0A80100000`):**
+
+Fd-pair only approach:
+
+1. Creates two fd pairs.
+2. Searches for kernel pointer patterns using the fd pairs.
+3. Stores four fds at `state + 6448/6452/6456/6460`.
+4. Publishes kernel object at `state + 6608`.
+
+All three paths retry up to 5 times on failure (error code 258054).
+
+#### 5. Kernel read/write primitives
+
+`sub_1E238` (kread) and `sub_1E0B8` (kwrite) select the appropriate backend based on which primitive was acquired:
+
+| Priority | Condition | kread impl | kwrite impl |
+|---|---|---|---|
+| 1 | `state + 48` callback set | direct callback | `state + 64` callback |
+| 2 | `state + 232` IOSurface connect valid | `sub_1D7F8` | `sub_1DBC0` |
+| 3 | `state + 7488` newest helper set | `sub_ABD8` | `sub_AC54` |
+| 4 | fd pairs + kptr (`6448/6452/6464/536`) | `sub_1C9B8` | `sub_1D334` |
+| 5 | fd pairs only (`6448-6460`) | `sub_1C190` | `sub_1C2F0` |
+| 6 | task port at `state + 6424` | `mach_vm_read` | `mach_vm_write` + `mach_vm_machine_attribute` |
+
+The write fallback also flushes via `mach_vm_machine_attribute(task, addr, 4, MATTR_VAL_CACHE_FLUSH)`.
+
+#### 6. Policy and entitlement patching
+
+After the primitive is stable:
+
+- Resolves `com.apple.security.sandbox` kext via `sub_1B5DC`
+- Resolves `com.apple.driver.AppleMobileFileIntegrity` kext via `sub_1B5DC`
+- For each kext: allocates a 0x128-byte helper, calls `sub_1305C` to initialize it
+- Resolves `developer_mode_status` in AMFI `__DATA.__data` via `sub_15628`
+- Resolves `allows_security_research` in AMFI `__DATA.__data` via `sub_15628`
+- Reads current values via `sub_1DF78` (kread). If `developer_mode_status == 0`, writes `1` via `sub_1E8E0` (kwrite). Same for `allows_security_research`.
+
+Baked entitlement plists for injection:
+
+- `<dict><key>task_for_pid-allow</key><true/></dict>`
+- `<dict><key>com.apple.private.iokit.IOServiceSetAuthorizationID</key><true/></dict>`
+- `<dict><key>com.apple.private.vfs.snapshot</key><true/></dict>`
+- `<dict><key>com.apple.private.security.disk-device-access</key><true/></dict>`
+- `<dict><key>com.apple.private.diskimages.kext.user-client-access</key><true/><key>com.apple.private.security.disk-device-access</key><true/><key>com.apple.security.iokit-user-client-class</key><array><string>IOHDIXControllerUserClient</string></array></dict>`
+
+#### 7. Task and host escalation
+
+- Calls `sub_31350(state, mach_task_self_, 0, 0)` to re-apply task credentials
+- Obtains `host_priv` port via `sub_2F660` → `state + 6432`
+- Verifies host_priv is real by calling `host_get_special_port(host_priv, -1, 16, &port)` — expects `HOST_KEXTD_PORT` to be invalid (port == 0), confirming this is the real host_priv, not a fake
+- Calls `sub_306F4(state, mach_task_self_)` for task-level operations
+- On older kernels: `sub_2F7A8` obtains an additional special port at `state + 6436`
+
+#### 8. Terminal publication
+
+Three paths depending on kernel version:
+
+- `sub_14774` for `state+344 <= 0x1F530F027FFFFF` (oldest)
+- `sub_14A04` for middle range with specific state bits
+- `sub_9B74` for `state+344 > 0x2257FFFFFFFFFFFF` (newest, iOS 17)
+
+### Command Dispatcher (`sub_33324` / e9f89858 variant)
+
+The dispatcher exposes a rich selector-based API. Commands are grouped by `BYTE1(selector)`:
+
+**Family 0 (`selector & 0xFF00 == 0`):** General task/kernel operations
+
+| Selector | Description |
+|---|---|
+| `1` | Read task credential flags at version-dependent offsets. Checks `0x400` bit and `getppid()`. |
+| `2` / `21` | `sub_2FC50` — task operation on self or specified port |
+| `3` / `0x40000003` / `0x40000009` | `sub_11A88` — initialization |
+| `6` | `sub_23950` — task setup on self |
+| `7` | `sub_2F06C` + capture `mach_thread_self()` at `state + 6444` |
+| `8` | `sub_2F1C8` — additional setup |
+| `9` / `0x4000001A` | `sub_306F4` — task inspection |
+| `10` | `sub_1A384` — mode set |
+| `11` / `0x40000008` | `sub_2ED58` — entitlement injection |
+| `12` | `sub_237B0` — task operation |
+| `13` / `22` | `sub_2F954` — task port operation |
+| `15` / `19` | `sub_2381C` — task flag set/clear |
+| `20` | `sub_21A90` — write with data |
+| `23` | `sub_32F9C` — task/host operation |
+| `31` | `sub_318A0` + `sub_31350` — credential refresh |
+| `34` | `sub_142A0` with `vm_protect` args |
+| `38` | `sub_2F808` — pmap operation |
+| `0x40000011` | `mach_vm_wire(host_priv, task, addr, size, prot)` — wire kernel memory |
+
+**Family 1 (`selector & 0xFF00 == 0x100`):** Exploit primitive operations
+
+| Selector | Description |
+|---|---|
+| `265` | `sub_10F94` — primitive build/test |
+| `268` | Opens file by path (or `_CFProcessPath`), reads kernel object via `sub_250D8` |
+| `269` | `sub_34644` — conditional on kernel address threshold (`state+344 >> 43 >= 0x44B`) |
+| `0x4000010A` | `sub_18A4C` — targeted kernel operation |
+| `0x40000105` | `sub_18B08` — data write to kernel |
+| `-0x80000104` | `sub_11650` — status query |
+| `-0x80000103` | `sub_10944` + `sub_345BC` — state probe |
+
+**Family 3 (`selector & 0xFF00 == 0x300`):** Higher-level operations (older kernels only, `state+344 <= 0x1F52FFFFFFFFFFFF` and build <= 8791)
+
+| Selector | Description |
+|---|---|
+| `0x40000301` | `sub_16EFC` — with single arg |
+| `0x40000304` | `sub_16B20` — with offset arg |
+| `0x40000305` | `sub_16A08` — complex multi-arg |
+| `0x40000306` | `sub_174FC` — data operation |
+| `0x302` (770) | `sub_16D70` — standalone |
+| `-0x80000302` | `sub_17448` — read with output |
+| `-0x3FFFFF03` | `sub_16B68` — read with data output |
+
+**Selector `0xC000001B` (query):** Returns available capability bitmask. Caller supplies requested bits; dispatcher returns only the subset available. Supported bits: `0x1`, `0x2`, `0x4`, `0x8`.
+
+**Selector `0x4000001B` (task flag set):** Already documented above in the selector contract section.
 
 ### Concrete Selector Contract
 
