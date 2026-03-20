@@ -823,10 +823,12 @@ This is the validator/loader for record `0xF0000`:
 - fetches record `983040`
 - requires size at least `0x21`
 - accepts FAT or thin Mach-O magic:
-  - `0xBEBAFECA`
-  - `0xCAFEBABE`
-  - `0xCEFAEDFE`
-  - `0xCFFAEDFE`
+  - `0xBEBAFECA` (FAT, little-endian)
+  - `0xCAFEBABE` (FAT, big-endian)
+  - `0xFEEDFACE` (MH_MAGIC, 32-bit)
+  - `0xFEEDFACF` (MH_MAGIC_64, 64-bit)
+  - `0xCEFAEDFE` (MH_CIGAM, 32-bit byte-swapped)
+  - `0xCFFAEDFE` (MH_CIGAM_64, 64-bit byte-swapped)
 
 ### `sub_20024`
 
@@ -860,9 +862,9 @@ The thread pack layout:
 - `+0x08` mode byte (inverted from `ctx + 1478`)
 - `+0x10` kernel version buffer
 - `+0x18` kernel version buffer size
-- `+0x20` `0x70004` string handle
-- `+0x28` `0x70006` string handle
-- `+0x30` `0x70003` string handle
+- `+0x20` `0x70003` string handle
+- `+0x28` `0x70004` string handle
+- `+0x30` `0x70006` string handle
 
 ### Worker Thread `sub_71F8` → `sub_7410`: Main Post-Exploit Dispatch
 
